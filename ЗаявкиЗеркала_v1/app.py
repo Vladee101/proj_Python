@@ -90,7 +90,7 @@ class OrderDialog(QDialog):
  def validate(self):
   if not self.items:QMessageBox.warning(self,'Проверка','Добавьте хотя бы один товар');return
   articles=[x['article'].casefold() for x in self.items]
-  if len(articles)!=len(set(articles)):QMessageBox.warning(self,'Проверка','Артикулы в заявке должны быть уникальными');return
+  if len(articles)!=len(set(articles)) and QMessageBox.question(self,'Проверка','В заявке есть дубликаты артикулов. Продолжить?')!=QMessageBox.Yes:return
   self.accept()
 class Main(QMainWindow):
  def __init__(self):
@@ -169,7 +169,8 @@ class Main(QMainWindow):
    data=self._load_or_warn()
    if data is None:return
    existing={i['article'].casefold() for o in data['orders'] for i in o['items']}
-   if any(i['article'].casefold() in existing for i in d.items):QMessageBox.warning(self,'Артикул','Такой артикул уже существует');return
+   dup=[i['article'] for i in d.items if i['article'].casefold() in existing]
+   if dup and QMessageBox.question(self,'Артикул','Такой артикул уже существует: '+', '.join(dup[:5])+'. Продолжить?')!=QMessageBox.Yes:return
    number=max([o['number'] for o in data['orders']],default=0)+1
    order={'id':uuid.uuid4().hex,'number':number,'supplier':d.supplier.currentText(),'created_at':NOW(),'created_by':self.user.currentText(),'items':d.items}
    data['orders'].append(order);event(data,self.user.currentText(),'Создание заявки',f'№{number}')
@@ -183,7 +184,8 @@ class Main(QMainWindow):
    data=self._load_or_warn()
    if data is None:return
    existing={i['article'].casefold() for o in data['orders'] if o['id']!=order['id'] for i in o['items']}
-   if any(i['article'].casefold() in existing for i in d.items):QMessageBox.warning(self,'Артикул','Такой артикул уже существует');return
+   dup=[i['article'] for i in d.items if i['article'].casefold() in existing]
+   if dup and QMessageBox.question(self,'Артикул','Такой артикул уже существует: '+', '.join(dup[:5])+'. Продолжить?')!=QMessageBox.Yes:return
    for o in data['orders']:
     if o['id']==order['id']:
      before=json.dumps(o,ensure_ascii=False);o['supplier']=d.supplier.currentText();o['items']=d.items
