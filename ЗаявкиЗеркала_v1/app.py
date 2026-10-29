@@ -1,13 +1,14 @@
 import os,sys,json,uuid,datetime,tempfile,shutil,subprocess,atexit,msvcrt
 from pathlib import Path
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QFormLayout,QLineEdit,QComboBox,QDateEdit,QSpinBox,QPushButton,QTableWidget,QTableWidgetItem,QMessageBox,QDialog,QDialogButtonBox,QPlainTextEdit,QLabel,QTabWidget,QHeaderView,QFileDialog)
-from PySide6.QtCore import Qt,QDate
+from PySide6.QtCore import Qt,QDate,QTimer
 from PySide6.QtGui import QFont
 
 BASE=Path(sys.executable if getattr(sys,'frozen',False) else __file__).resolve().parent
 DATA=BASE/'Заявки.json'; LOCK=BASE/'Заявки.lock'; BACKUP=BASE/'Резервные_копии'
 SUPPLIERS=['Толик','СтеклоСтиль','УзорСтекло']
 USERS={'Попов Вадим':'Оформитель','Мищенко Андрей':'Приёмщик'}
+PILLS={'ok':('✓ Сохранено','#e8f5ec','#1e7e34'),'view':('🔒 Режим просмотра','#efefef','#555555'),'err':('⚠ Ошибка сохранения','#fdeaea','#c0392b')}
 NOW=lambda:datetime.datetime.now().isoformat(timespec='seconds')
 # Windows SMB byte-range lock held for the entire editing session.
 SESSION_LOCK=None
@@ -95,9 +96,10 @@ class Main(QMainWindow):
  def __init__(self):
   super().__init__();self.setWindowTitle('Заявки на зеркала и стекло');self.resize(1260,750)
   self.can_edit=acquire_session();self.user=QComboBox();self.user.addItems(USERS);self.user.currentTextChanged.connect(self.refresh)
-  central=QWidget();self.setCentralWidget(central);root=QVBoxLayout(central);top=QHBoxLayout();top.addWidget(QLabel('Сотрудник:'));top.addWidget(self.user);top.addStretch();root.addLayout(top)
+  central=QWidget();self.setCentralWidget(central);root=QVBoxLayout(central);top=QHBoxLayout();top.addWidget(QLabel('Сотрудник:'));top.addWidget(self.user);top.addStretch();self.pill=QLabel();self.pill.hide();top.addWidget(self.pill);root.addLayout(top)
+  self._pill_timer=QTimer(self);self._pill_timer.setSingleShot(True);self._pill_timer.timeout.connect(lambda:self.pill.hide() if self.can_edit else self.set_pill('view'))
   self.metrics=QLabel();root.addWidget(self.metrics)
-  if not self.can_edit:root.addWidget(QLabel('РЕЖИМ ПРОСМОТРА: другой сотрудник редактирует данные. Для получения доступа закройте и снова откройте программу после освобождения.'))
+  if not self.can_edit:self.set_pill('view')
   controls=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('Поиск: артикул, название, характеристики, номер заявки, размер');self.search.textChanged.connect(self.refresh);controls.addWidget(self.search)
   self.supplier=QComboBox();self.supplier.addItems(['Все поставщики']+SUPPLIERS);self.supplier.currentTextChanged.connect(self.refresh);controls.addWidget(self.supplier)
   self.status=QComboBox();self.status.addItems(['Все статусы','Ожидаем','Принято','Возврат','Просрочено']);self.status.currentTextChanged.connect(self.refresh);controls.addWidget(self.status)
@@ -112,7 +114,8 @@ class Main(QMainWindow):
   r=self.table.currentRow()
   if r<0:QMessageBox.information(self,'Выбор','Выберите товар в таблице');return None,None
   order_id=self.table.item(r,0).data(Qt.UserRole);item_id=self.table.item(r,2).data(Qt.UserRole)
-  data=load()
+  data=self._load_or_warn()
+  if data is None:return None,None
   for order in data['orders']:
    if order['id']==order_id:
     for item in order['items']:
@@ -149,53 +152,71 @@ class Main(QMainWindow):
   if not self.can_edit:QMessageBox.warning(self,'Занято','Другой пользователь уже работает с файлом. Доступен только просмотр.');return False
   if USERS[self.user.currentText()]!=role:QMessageBox.warning(self,'Доступ',f'Действие доступно роли «{role}»');return False
   return True
+ def set_pill(self,kind,sticky=True,text=None):
+  label,bg,fg=PILLS[kind];self.pill.setText(text or label);self.pill.setStyleSheet(f'padding:3px 10px;border-radius:10px;background:{bg};color:{fg};font-weight:600;');self.pill.setToolTip('Другой сотрудник редактирует данные. Для получения доступа закройте и снова откройте программу после освобождения.' if kind=='view' else '');self.pill.show()
+  if not sticky:self._pill_timer.start(5000)
+ def _save(self,data):
+  try:save(data)
+  except Exception as ex:self.set_pill('err');QMessageBox.critical(self,'Ошибка сохранения',f'Не удалось записать данные: {ex}');return False
+  self.set_pill('ok',sticky=False);return True
+ def _load_or_warn(self):
+  try:return load()
+  except Exception as ex:self.set_pill('err',text='⚠ Ошибка чтения данных');QMessageBox.warning(self,'Ошибка данных',f'Не удалось прочитать данные: {ex}');return None
  def create(self):
   if not self.writable('Оформитель'):return
   d=OrderDialog(self)
   if d.exec():
-   data=load();existing={i['article'].casefold() for o in data['orders'] for i in o['items']}
+   data=self._load_or_warn()
+   if data is None:return
+   existing={i['article'].casefold() for o in data['orders'] for i in o['items']}
    if any(i['article'].casefold() in existing for i in d.items):QMessageBox.warning(self,'Артикул','Такой артикул уже существует');return
    number=max([o['number'] for o in data['orders']],default=0)+1
    order={'id':uuid.uuid4().hex,'number':number,'supplier':d.supplier.currentText(),'created_at':NOW(),'created_by':self.user.currentText(),'items':d.items}
-   data['orders'].append(order);event(data,self.user.currentText(),'Создание заявки',f'№{number}');save(data);self.refresh()
+   data['orders'].append(order);event(data,self.user.currentText(),'Создание заявки',f'№{number}')
+   if self._save(data):self.refresh()
  def edit(self):
   if not self.writable('Оформитель'):return
   order,item=self.selected()
   if not order:return
   d=OrderDialog(self,order)
   if d.exec():
-   data=load();existing={i['article'].casefold() for o in data['orders'] if o['id']!=order['id'] for i in o['items']}
+   data=self._load_or_warn()
+   if data is None:return
+   existing={i['article'].casefold() for o in data['orders'] if o['id']!=order['id'] for i in o['items']}
    if any(i['article'].casefold() in existing for i in d.items):QMessageBox.warning(self,'Артикул','Такой артикул уже существует');return
    for o in data['orders']:
     if o['id']==order['id']:
      before=json.dumps(o,ensure_ascii=False);o['supplier']=d.supplier.currentText();o['items']=d.items
      event(data,self.user.currentText(),'Редактирование заявки',f"№{o['number']}; до: {before}; после: {json.dumps(o,ensure_ascii=False)}");break
-   save(data);self.refresh()
+   if self._save(data):self.refresh()
  def transition(self,status):
   if not self.writable('Приёмщик'):return
   order,item=self.selected()
   if not item:return
   if item['status']!='Ожидаем':QMessageBox.warning(self,'Статус','Можно обработать только товар со статусом «Ожидаем»');return
   if QMessageBox.question(self,'Подтверждение',f"{status}: {item['article']} ({item['quantity']} шт.)?")!=QMessageBox.Yes:return
-  data=load()
+  data=self._load_or_warn()
+  if data is None:return
   for o in data['orders']:
    for i in o['items']:
     if i['id']==item['id']:
      i['status']=status;i['received_at']=NOW() if status=='Принято' else None;i['received_by']=self.user.currentText() if status=='Принято' else None;i['returned_at']=NOW() if status=='Возврат' else None;i['returned_by']=self.user.currentText() if status=='Возврат' else None
-  event(data,self.user.currentText(),status,item['article']);save(data);self.refresh()
+  event(data,self.user.currentText(),status,item['article'])
+  if self._save(data):self.refresh()
  def reset(self):
   if not self.writable('Оформитель'):return
   order,item=self.selected()
   if not item or item['status']!='Возврат':QMessageBox.warning(self,'Статус','Выберите возвращённый товар');return
   d=ItemDialog(self,item)
   if d.exec():
-   data=load()
+   data=self._load_or_warn()
+   if data is None:return
    for o in data['orders']:
     for i in o['items']:
      if i['id']==item['id']:
       i.update(d.value());i['status']='Ожидаем';i['received_at']=None;i['received_by']=None
    event(data,self.user.currentText(),'Повторное ожидание',f"{item['article']}; новая дата {d.value()['expected']}")
-   save(data);self.refresh()
+   if self._save(data):self.refresh()
  def history(self):
   data=load();dialog=QDialog(self);dialog.setWindowTitle('История действий');dialog.resize(900,450);layout=QVBoxLayout(dialog);table=QTableWidget(0,4);table.setHorizontalHeaderLabels(['Дата','Сотрудник','Действие','Подробности']);table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);layout.addWidget(table)
   for e in reversed(data['events']):
