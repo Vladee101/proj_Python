@@ -1,0 +1,45 @@
+name: Build EXE
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: ЗаявкиЗеркала_v1/requirements.txt
+
+      - name: Install dependencies
+        working-directory: ЗаявкиЗеркала_v1
+        run: python -m pip install -r requirements.txt
+
+      - name: Build EXE (PyInstaller)
+        working-directory: ЗаявкиЗеркала_v1
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ЗаявкиЗеркала" --collect-all reportlab app.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZayavkiZerkala-exe
+          path: ЗаявкиЗеркала_v1/dist/ЗаявкиЗеркала.exe
+          if-no-files-found: error
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$env:GITHUB_REF_NAME" "ЗаявкиЗеркала_v1/dist/ЗаявкиЗеркала.exe" --generate-notes --title "ЗаявкиЗеркала $env:GITHUB_REF_NAME"
