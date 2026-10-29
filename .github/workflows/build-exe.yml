@@ -38,8 +38,12 @@ jobs:
           path: ЗаявкиЗеркала_v1/dist/ЗаявкиЗеркала.exe
           if-no-files-found: error
 
+      - name: Stage EXE with ASCII name (GitHub rejects non-ASCII asset names)
+        working-directory: ЗаявкиЗеркала_v1/dist
+        run: Copy-Item "ЗаявкиЗеркала.exe" "ZayavkiZerkala.exe"
+
       - name: Create Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$env:GITHUB_REF_NAME" "ЗаявкиЗеркала_v1/dist/ЗаявкиЗеркала.exe" --generate-notes --title "ЗаявкиЗеркала $env:GITHUB_REF_NAME"
+        run: gh release create "$env:GITHUB_REF_NAME" "ЗаявкиЗеркала_v1/dist/ZayavkiZerkala.exe" --generate-notes --title "ЗаявкиЗеркала $env:GITHUB_REF_NAME" || gh release upload "$env:GITHUB_REF_NAME" "ЗаявкиЗеркала_v1/dist/ZayavkiZerkala.exe" --clobber

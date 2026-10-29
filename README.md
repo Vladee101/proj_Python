@@ -26,7 +26,7 @@ py ЗаявкиЗеркала_v1/app.py
 ## Сборка EXE
 
 - **Локально**: запустить `ЗаявкиЗеркала_v1/Собрать_EXE.bat` → готовый файл `dist\ЗаявкиЗеркала.exe`
-- **Автоматически**: GitHub Actions собирает EXE при каждом push в `main` (вкладка Actions → артефакт `ZayavkiZerkala-exe`), а при пуше тега `v*` создаёт GitHub Release с EXE
+- **Автоматически**: GitHub Actions собирает EXE при каждом push в `main` (вкладка Actions → артефакт `ZayavkiZerkala-exe`), а при пуше тега `v*` создаёт GitHub Release с готовым файлом `ZayavkiZerkala.exe`
 
 ## Данные (рядом с EXE)
 
