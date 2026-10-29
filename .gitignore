@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Данные приложения (хранятся рядом с EXE, в git не попадают)
+Заявки.json
+Заявки.lock
+Резервные_копии/
+*.log
